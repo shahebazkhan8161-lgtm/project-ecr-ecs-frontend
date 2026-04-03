@@ -1,0 +1,123 @@
+name: "Frontend — Build & Push"
+
+on:
+  push:
+    branches:
+      - develop
+      - staging
+      - main
+      - 'hotfix/*'    # hotfix branches bhi trigger karti hain
+  workflow_dispatch:
+
+# OIDC ke liye zaroori
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+
+  # ── Detect which environment based on branch ─────────
+  set-env:
+    name: "Set Environment"
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      image_tag:   ${{ steps.env.outputs.image_tag }}
+      role_arn:    ${{ steps.env.outputs.role_arn }}
+
+    steps:
+      - name: Detect environment from branch
+        id: env
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+
+          if   [ "$BRANCH" = "main" ];    then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "image_tag=prod-$SHA"    >> $GITHUB_OUTPUT
+            echo "role_arn=${{ secrets.PROD_IAM_ROLE_ARN }}" >> $GITHUB_OUTPUT
+          elif [ "$BRANCH" = "staging" ]; then
+            echo "environment=uat"        >> $GITHUB_OUTPUT
+            echo "image_tag=uat-$SHA"     >> $GITHUB_OUTPUT
+            echo "role_arn=${{ secrets.UAT_IAM_ROLE_ARN }}"  >> $GITHUB_OUTPUT
+          elif [[ "$BRANCH" == hotfix/* ]]; then
+            # hotfix → seedha production mein jaata hai
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "image_tag=hotfix-$SHA"  >> $GITHUB_OUTPUT
+            echo "role_arn=${{ secrets.PROD_IAM_ROLE_ARN }}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev"        >> $GITHUB_OUTPUT
+            echo "image_tag=dev-$SHA"     >> $GITHUB_OUTPUT
+            echo "role_arn=${{ secrets.DEV_IAM_ROLE_ARN }}"  >> $GITHUB_OUTPUT
+          fi
+
+  # ── Build & Push to ECR ───────────────────────────────
+  build-and-push:
+    name: "Docker Build & ECR Push [${{ needs.set-env.outputs.environment }}]"
+    runs-on: ubuntu-latest
+    needs: set-env
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    outputs:
+      image_tag: ${{ needs.set-env.outputs.image_tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume:    ${{ needs.set-env.outputs.role_arn }}
+          aws-region:        ${{ vars.AWS_REGION }}
+          role-session-name: gh-fe-${{ needs.set-env.outputs.environment }}-${{ github.run_id }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push
+        env:
+          REG: ${{ steps.ecr.outputs.registry }}
+          TAG: ${{ needs.set-env.outputs.image_tag }}
+          ENV: ${{ needs.set-env.outputs.environment }}
+        run: |
+          docker build -t $REG/ecr-ecs-frontend:$TAG          .
+          docker build -t $REG/ecr-ecs-frontend:$ENV-latest   .
+          docker push $REG/ecr-ecs-frontend:$TAG
+          docker push $REG/ecr-ecs-frontend:$ENV-latest
+
+      - name: Summary
+        run: |
+          echo "### Frontend Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "| Key | Value |"             >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |"               >> $GITHUB_STEP_SUMMARY
+          echo "| Env | ${{ needs.set-env.outputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | ${{ needs.set-env.outputs.image_tag }} |"   >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |"                     >> $GITHUB_STEP_SUMMARY
+
+  # ── Notify Infra Repo to Deploy ───────────────────────
+  # Frontend build hone ke baad infra repo ko trigger karta hai
+  trigger-infra-deploy:
+    name: "Trigger Infra Deploy"
+    runs-on: ubuntu-latest
+    needs: [set-env, build-and-push]
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Dispatch to infra repo
+        uses: actions/github-script@v7
+        with:
+          # Infra repo ke liye PAT chahiye — INFRA_DEPLOY_TOKEN secret mein set karo
+          github-token: ${{ secrets.INFRA_DEPLOY_TOKEN }}
+          script: |
+            await github.rest.repos.createDispatchEvent({
+              owner: context.repo.owner,
+              repo:  'project-ecr-ecs-infra',
+              event_type: 'frontend-updated',
+              client_payload: {
+                environment: '${{ needs.set-env.outputs.environment }}',
+                image_tag:   '${{ needs.set-env.outputs.image_tag }}',
+                triggered_by: 'frontend',
+                commit_sha:  '${{ github.sha }}'
+              }
+            });
+            console.log('Infra repo triggered successfully');

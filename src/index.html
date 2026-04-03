@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ECR-ECS App</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="brand">ECR-ECS App</div>
+    <div class="nav-links">
+      <a href="#" onclick="showPage('login')">Login</a>
+      <a href="#" onclick="showPage('register')">Register</a>
+      <a href="#" onclick="logout()" id="logout-btn" style="display:none">Logout</a>
+    </div>
+  </nav>
+
+  <div id="page-login" class="page active">
+    <div class="card">
+      <h2>Login</h2>
+      <input type="email"    id="login-email"    placeholder="Email"/>
+      <input type="password" id="login-password" placeholder="Password"/>
+      <button onclick="login()">Login</button>
+      <p id="login-msg" class="msg"></p>
+    </div>
+  </div>
+
+  <div id="page-register" class="page">
+    <div class="card">
+      <h2>Register</h2>
+      <input type="text"     id="reg-name"     placeholder="Full Name"/>
+      <input type="email"    id="reg-email"    placeholder="Email"/>
+      <input type="password" id="reg-password" placeholder="Password"/>
+      <button onclick="register()">Register</button>
+      <p id="reg-msg" class="msg"></p>
+    </div>
+  </div>
+
+  <div id="page-dashboard" class="page">
+    <div class="card">
+      <h2>Dashboard</h2>
+      <p id="welcome-msg">Welcome!</p>
+      <div class="info-box">
+        <p>Running on AWS ECS Fargate</p>
+        <p>Deployed via GitHub Actions + OIDC</p>
+        <p>Infrastructure managed by Terraform</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
