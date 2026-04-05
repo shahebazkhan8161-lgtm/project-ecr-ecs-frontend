@@ -67,7 +67,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume:    ${{ needs.set-env.outputs.role_arn }}
-          aws-region:        ${{ vars.AWS_REGION }}
+          aws-region: ap-south-1
           role-session-name: gh-fe-${{ needs.set-env.outputs.environment }}-${{ github.run_id }}
 
       - name: Login to ECR
